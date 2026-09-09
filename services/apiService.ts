@@ -1006,7 +1006,7 @@ export const checkUsernameExists = async (username: string): Promise<boolean> =>
 
     if (error) {
         console.error('Error checking username:', error);
-        throw new Error('Could not verify username availability.');
+        throw new Error(`Could not verify username availability: ${error.message || JSON.stringify(error)}`);
     }
     return !!data;
 };
