@@ -16,8 +16,13 @@
 import { createClient } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+// Clean the URL to prevent "Invalid path" errors by removing trailing slashes and /rest/v1
+const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL || "")
+  .trim()
+  .replace(/\/$/, "")
+  .replace(/\/rest\/v1$/, "");
+
+const supabaseAnonKey = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || "").trim();
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
