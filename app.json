@@ -1,0 +1,91 @@
+{
+  "expo": {
+    "name": "Postly",
+    "slug": "postly",
+    "version": "1.0.8",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "postly",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.postly.social",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Postly needs camera access to take photos and stories.",
+        "NSPhotoLibraryUsageDescription": "Postly needs photo library access to share images.",
+        "NSPhotoLibraryAddUsageDescription": "Postly needs permission to save photos to your library."
+      }
+    },
+    "android": {
+      "versionCode": 8,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#000000"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.postly.social",
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "postly"
+            },
+            {
+              "scheme": "https",
+              "host": "postly.social",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
+      "softwareKeyboardLayoutMode": "pan",
+      "allowBackup": true,
+      "googleServicesFile": "./google-services.json",
+      "blockedPermissions": []
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Postly to access your camera to take photos and stories."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Postly to access your photos to share images."
+        }
+      ],
+      "expo-media-library",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#3b82f6"
+        }
+      ]
+    ]
+  }
+}
