@@ -33,6 +33,12 @@ The tech world often leaves invisible identities behind. Postly is built to be a
 - Database-Level Security: Secure access managed via strict Supabase Row Level Security (RLS) policies.
 - Future-Proof Roadmap: Planning for decentralized networking and integration with open communication standards like the ActivityPub protocol (Fediverse ecosystem).
 
+## 🚀 Environment Configuration for EAS
+When building with EAS, your local `.env` files are ignored. You must configure environment variables in the Expo dashboard or `eas.json`:
+
+1. **EAS Secrets**: Run `eas secret:create --name EXPO_PUBLIC_SUPABASE_URL --value <your-url>`
+2. **EAS JSON**: Add an `env` object to your profile in `eas.json`.
+
 ## Tech Stack
 
 - React Native + Expo SDK 54
