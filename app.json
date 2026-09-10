@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "scheme": "postly",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "updates": {
       "url": "https://u.expo.dev/5e118560-f83a-4e77-9176-0ffa4425ec3c"
     },
