@@ -14,7 +14,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: 'npm'
 
       - name: Setup Java
@@ -27,19 +27,27 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
 
       - name: Prebuild Android
-        run: npx expo prebuild --platform android
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
+        run: npx expo prebuild --platform android --no-install
 
-      - name: Build APK
+      - name: Build Release APK
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
+          NODE_OPTIONS: "--max-old-space-size=4096"
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
-
+          ./gradlew assembleRelease --no-daemon
+          
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: postly-apk
+          name: postly-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
