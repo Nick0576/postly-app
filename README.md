@@ -118,8 +118,12 @@ $env:PATH += ";C:\Program Files\nodejs"; cd android; ./gradlew assembleRelease
 ```
 The APK will be at `android/app/build/outputs/apk/release/app-release.apk`.
 
-#### Option 3: GitHub Actions (Cloud Link)
-Push your code to GitHub and check the **Actions** tab. It will automatically build an APK and provide a download link in the "Artifacts" section.
+#### Option 3: GitHub Actions (Cloud Link) - RECOMMENDED
+If local builds fail or EAS limits are reached:
+1. Push your code to GitHub: `git push origin main`
+2. Go to the **Actions** tab on GitHub.
+3. Wait for the green checkmark ✅.
+4. Download the **postly-debug-apk** from the "Artifacts" section.
 
 #### Troubleshooting Local Builds
 - **Licenses Not Accepted**: Run `sdkmanager --licenses` in your Android SDK bin folder.
