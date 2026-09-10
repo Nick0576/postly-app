@@ -309,3 +309,9 @@ export const ChevronRightIcon: React.FC<IconProps> = ({ color = "#fff", size = 2
     <Path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
   </Svg>
 );
+
+export const ChevronLeftIcon: React.FC<IconProps> = ({ color = "#fff", size = 24 }) => (
+  <Svg width={size} height={size} fill="none" stroke={color} viewBox="0 0 24 24">
+    <Path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+  </Svg>
+);

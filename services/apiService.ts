@@ -476,21 +476,37 @@ const uploadStoryMedia = async (
 };
 
 const blobToDataUrl = async (blob: Blob): Promise<string> => {
-    if (typeof FileReader === 'undefined') {
-        throw new Error('FileReader is not available');
+    try {
+        if (typeof FileReader !== 'undefined') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    if (typeof reader.result === 'string') {
+                        resolve(reader.result);
+                    } else {
+                        reject(new Error('Could not convert blob to data URL'));
+                    }
+                };
+                reader.onerror = () => reject(reader.error || new Error('FileReader error'));
+                reader.readAsDataURL(blob);
+            });
+        }
+    } catch (e) {
+        console.warn("FileReader failed, attempting ArrayBuffer fallback", e);
     }
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            if (typeof reader.result === 'string') {
-                resolve(reader.result);
-            } else {
-                reject(new Error('Could not convert blob to data URL'));
-            }
-        };
-        reader.onerror = () => reject(reader.error || new Error('FileReader error'));
-        reader.readAsDataURL(blob);
-    });
+
+    // Fallback if FileReader is not available (e.g. some React Native environments)
+    try {
+        // Use the existing arrayBufferToDataUrl helper
+        // We need to get an ArrayBuffer from the blob first
+        // In many RN environments, blob.arrayBuffer() or reading via fetch works
+        const response = new Response(blob);
+        const arrayBuffer = await response.arrayBuffer();
+        return arrayBufferToDataUrl(arrayBuffer, blob.type);
+    } catch (e) {
+        console.error("All data URL conversion methods failed", e);
+        throw new Error('Could not convert media to data URL');
+    }
 };
 
 const buildTextStoryDataUri = (text: string): string => {
@@ -1593,17 +1609,37 @@ export const followUser = async (follower_id: string, followed_id: string): Prom
         .maybeSingle();
 
     if (mutualFollow) {
-        // Trigger Love Mode if both follow each other
+        console.log("MUTUAL FOLLOW DETECTED: Triggering Love Mode");
+        // Notify both users that Love Mode is unlocked
         await sendNotification({
             sender_id: follower_id,
             receiver_id: followed_id,
-            type: 'love_request'
+            type: 'love_request',
+            content: "You've unlocked Love Mode! Tap to start."
         });
 
+        // Portal message in the chat
         await sendMessage({
             sender_id: follower_id,
             receiver_id: followed_id,
-            text: "I've unlocked Love Mode for us! Tap to start.",
+            text: "💖 We've unlocked Love Mode! Tap here to start the 20 questions.",
+            type: 'love_request'
+        });
+
+        // Also send from the other side so it's visible for both immediately
+        await sendMessage({
+            sender_id: followed_id,
+            receiver_id: follower_id,
+            text: "💖 We've unlocked Love Mode! Tap here to start the 20 questions.",
+            type: 'love_request'
+        });
+
+        // Optional: Send a notification to the follower as well so they see the success immediately
+        await sendNotification({
+            sender_id: followed_id, // Appearing as from the other user for the UI
+            receiver_id: follower_id,
+            type: 'love_request',
+            content: "Love Mode is now active! Go to chat to start."
         });
     }
 };
@@ -1852,14 +1888,16 @@ export const getChatListUsers = async (userId: string): Promise<SimpleUser[]> =>
             .in('id', Array.from(partnerIds));
         
         if (profilesError) {
-            throw profilesError;
+            console.error("Error fetching chat partner profiles:", profilesError);
+            // Don't throw, return what we have or empty list
+            return [];
         }
 
         // Map profiles to SimpleUser objects
         const users: SimpleUser[] = (profiles || []).map((u: any) => ({
             id: u.id,
-            name: u.full_name,
-            username: u.username,
+            name: u.full_name || 'Postly User',
+            username: u.username || 'unknown',
             avatar: u.avatar_url,
             isVerified: u.is_verified,
         }));
@@ -1882,10 +1920,10 @@ export const getChatListUsers = async (userId: string): Promise<SimpleUser[]> =>
 };
 
 export const sendMessage = async (
-    { sender_id, receiver_id, text, post, user, replied_story_id, reply_to }: 
-    { sender_id: string, receiver_id: string, text?: string | null, post?: Post | null, user?: SimpleUser | null, replied_story_id?: string | null, reply_to?: string | null }
+    { sender_id, receiver_id, text, post, user, replied_story_id, reply_to, type: forcedType, love_mode_data }:
+    { sender_id: string, receiver_id: string, text?: string | null, post?: Post | null, user?: SimpleUser | null, replied_story_id?: string | null, reply_to?: string | null, type?: Message['type'], love_mode_data?: any }
 ): Promise<Message> => {
-    let type: Message['type'] = 'text';
+    let type: Message['type'] = forcedType || 'text';
     if(post) type = 'post_share';
     if(user) type = 'profile_share';
     if(replied_story_id) type = 'story_reply';
@@ -1900,7 +1938,8 @@ export const sendMessage = async (
             shared_post_id: post?.id,
             shared_profile_id: user?.id,
             replied_story_id,
-            reply_to
+            reply_to,
+            love_mode_data
         })
         .select()
         .single();

@@ -36,9 +36,10 @@ import {
 import { supabase } from '../../services/supabase.native';
 import UserAvatar from '../../components/native/UserAvatar';
 import RenderUserContent from '../../components/native/RenderUserContent';
-import { VerifiedIcon, ThreeDotsVerticalIcon } from '../../components/native/Icons';
+import { VerifiedIcon, ThreeDotsVerticalIcon, ChevronDownIcon, PlusIcon, XIcon, TrashIcon, UserIcon } from '../../components/native/Icons';
 import PostSkeleton from '../../components/native/PostSkeleton';
-import type { Post } from '../../types';
+import type { Post, SavedAccount } from '../../types';
+import { Modal, ScrollView, TouchableOpacity } from 'react-native';
 
 const GRID_GAP = 2;
 const NUM_COLUMNS = 3;
@@ -78,7 +79,7 @@ const GridTile: React.FC<{ post: Post; onPress: () => void }> = React.memo(({ po
 // ─── Profile Screen ──────────────────────────────
 
 export default function ProfileScreen() {
-  const { userProfile, refreshAllData, addToast, followedUsernames } = useApp();
+  const { userProfile, refreshAllData, addToast, followedUsernames, savedAccounts, switchAccount, removeSavedAccount, logout } = useApp();
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<TabType>('posts');
@@ -89,6 +90,7 @@ export default function ProfileScreen() {
   const [followingCount, setFollowingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
 
   const fetchAll = useCallback(async () => {
     if (!userProfile?.id) return;
@@ -183,16 +185,37 @@ export default function ProfileScreen() {
   const ProfileHeader = () => (
     <View>
       <View className="px-4 py-3 border-b border-gray-800 flex-row justify-between items-center">
-        <Text className="text-white font-bold text-xl">@{userProfile.username}</Text>
         <Pressable
-          onPress={() => router.push('/settings')}
-          className="p-2"
-          hitSlop={8}
-          accessibilityLabel="Settings"
+          onPress={() => setShowAccountSwitcher(true)}
+          className="flex-row items-center"
         >
-          <ThreeDotsVerticalIcon color="#fff" size={22} />
+          <Text className="text-white font-bold text-xl mr-1">@{userProfile.username}</Text>
+          <ChevronDownIcon color="#fff" size={18} />
         </Pressable>
+        <View className="flex-row items-center">
+          <Pressable
+            onPress={() => setShowAccountSwitcher(true)}
+            className="p-2"
+            hitSlop={8}
+            accessibilityLabel="Switch Account"
+          >
+            <UserIcon color="#fff" size={22} />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/settings')}
+            className="p-2"
+            hitSlop={8}
+            accessibilityLabel="Settings"
+          >
+            <ThreeDotsVerticalIcon color="#fff" size={22} />
+          </Pressable>
+        </View>
       </View>
+
+      <AccountSwitcherModal
+        visible={showAccountSwitcher}
+        onClose={() => setShowAccountSwitcher(false)}
+      />
 
       <View className="p-4">
         <View className="flex-row items-center">
@@ -266,6 +289,82 @@ export default function ProfileScreen() {
   const renderItem = useCallback(({ item }: { item: Post }) => (
     <GridTile post={item} onPress={() => handlePostPress(item)} />
   ), [handlePostPress]);
+
+  const AccountSwitcherModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <Pressable className="flex-1 bg-black/60" onPress={onClose}>
+        <View className="mt-auto bg-gray-900 rounded-t-3xl p-6" onStartShouldSetResponder={() => true}>
+          <View className="flex-row justify-between items-center mb-6">
+            <Text className="text-white text-xl font-bold">Switch Account</Text>
+            <Pressable onPress={onClose}>
+              <XIcon color="#fff" size={24} />
+            </Pressable>
+          </View>
+
+          <ScrollView className="max-h-96">
+            {savedAccounts.map((account) => (
+              <View key={account.id} className="flex-row items-center justify-between mb-4">
+                <Pressable
+                  className="flex-row items-center flex-1"
+                  onPress={async () => {
+                    if (account.id !== userProfile.id) {
+                      await switchAccount(account.id);
+                    }
+                    onClose();
+                  }}
+                >
+                  <UserAvatar
+                    username={account.username}
+                    avatarUrl={account.profilePicture}
+                    size={50}
+                  />
+                  <View className="ml-3">
+                    <Text className="text-white font-bold">{account.name}</Text>
+                    <Text className="text-gray-500">@{account.username}</Text>
+                  </View>
+                  {account.id === userProfile.id && (
+                    <View className="ml-auto bg-blue-500/20 px-2 py-1 rounded">
+                      <Text className="text-blue-500 text-xs font-bold">Current</Text>
+                    </View>
+                  )}
+                </Pressable>
+
+                {account.id !== userProfile.id && (
+                  <Pressable
+                    className="ml-4 p-2"
+                    onPress={() => removeSavedAccount(account.id)}
+                  >
+                    <TrashIcon color="#ef4444" size={20} />
+                  </Pressable>
+                )}
+              </View>
+            ))}
+
+            {savedAccounts.length < 5 && (
+              <Pressable
+                className="flex-row items-center py-2 mb-4"
+                onPress={async () => {
+                  onClose();
+                  await logout();
+                  router.replace('/(auth)/login');
+                }}
+              >
+                <View className="w-[50px] h-[50px] rounded-full bg-gray-800 items-center justify-center">
+                  <PlusIcon color="#fff" size={24} />
+                </View>
+                <Text className="text-white font-bold ml-3">Add Account</Text>
+              </Pressable>
+            )}
+          </ScrollView>
+        </View>
+      </Pressable>
+    </Modal>
+  );
 
   const emptyMessage = activeTab === 'posts'
     ? 'No posts yet.'

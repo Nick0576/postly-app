@@ -23,6 +23,9 @@ The tech world often leaves invisible identities behind. Postly is built to be a
 - Push Notifications — Expo push notifications
 - User Profiles — View and edit profiles, follow/unfollow
 - Stories — Create and view ephemeral stories
+- Love Mode — Interactive 20-questions matching for mutual follows
+- Account Switching — Multi-account support for seamless profile management
+- File Contributions — Community-driven asset sharing (music, artwork, themes) via "Donate a File"
 - Dark Theme — Full dark mode UI
 - Interoperability — Built for decentralization and integration with open communication standards like the ActivityPub protocol (Fediverse ecosystem)
 
@@ -41,7 +44,9 @@ When building with EAS, your local `.env` files are ignored. You must configure 
 
 ## Tech Stack
 
-- React Native + Expo SDK 54
+- React Native + Expo SDK 54 (New Architecture)
+- React 19 + React Native 0.81.5
+- Reanimated 4 — Experimental worklet engine
 - Expo Router — File-based navigation
 - NativeWind — Tailwind CSS for React Native
 - Supabase — Auth, Database, Storage, Realtime
@@ -100,11 +105,25 @@ npx expo start --android
 ```
 
 ### Building for Production
+
+#### Option 1: Build with EAS (Cloud)
+```bash
+eas build --platform android --profile preview
 ```
-# Build with EAS
-eas build --platform ios
-eas build --platform android
+
+#### Option 2: Local Windows Build (Manual)
+If you reach your EAS free tier limit, use this command in PowerShell:
+```powershell
+$env:PATH += ";C:\Program Files\nodejs"; cd android; ./gradlew assembleRelease
 ```
+The APK will be at `android/app/build/outputs/apk/release/app-release.apk`.
+
+#### Option 3: GitHub Actions (Cloud Link)
+Push your code to GitHub and check the **Actions** tab. It will automatically build an APK and provide a download link in the "Artifacts" section.
+
+#### Troubleshooting Local Builds
+- **Licenses Not Accepted**: Run `sdkmanager --licenses` in your Android SDK bin folder.
+- **Node Not Found**: Ensure `$env:NODE_BINARY = "node"` is set in your terminal session.
 
 ## Project Structure
 ```
@@ -166,6 +185,23 @@ See [NOTICE](NOTICE) for third-party library attributions.
 3. **Environment Sync**: Verify that the Supabase `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` in the build environment match the production instance.
 
 The project is now ready for the final production build phase.
+
+## 🚀 OTA Updates (EAS Update)
+
+Postly supports Over-the-Air (OTA) updates using Expo EAS Update. This allows you to push bug fixes and UI improvements to users immediately without them having to download a new APK or app store update.
+
+### How it works:
+1.  **Native Code vs JS**: As long as you don't change native dependencies (like adding a new `expo-*` library that requires native changes), you can push updates OTA.
+2.  **Branches**: Updates are published to specific branches (e.g., `production`, `preview`).
+
+### Pushing an Update:
+1.  **Install EAS CLI**: `npm install -g eas-cli`
+2.  **Configure (First time)**: `eas update:configure`
+3.  **Publish Changes**:
+    ```bash
+    eas update --branch production --message "Fix chat persistence and sync issues"
+    ```
+4.  **User Experience**: The next time a user opens the app, it will check for updates in the background. On the subsequent restart, the new version will be active.
 
 ## Acknowledgments
 

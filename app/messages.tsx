@@ -44,7 +44,7 @@ import {
 import { supabase } from '../services/supabase.native';
 import UserAvatar from '../components/native/UserAvatar';
 import RenderUserContent from '../components/native/RenderUserContent';
-import { SearchIcon, VerifiedIcon, CheckIcon, DoubleCheckIcon, ArrowLeftIcon } from '../components/native/Icons';
+import { SearchIcon, VerifiedIcon, CheckIcon, DoubleCheckIcon, ArrowLeftIcon, HeartIcon } from '../components/native/Icons';
 import type { Message, Post, SimpleUser, Story } from '../types';
 
 // ─── Message Status ───────────────────────────
@@ -139,6 +139,19 @@ export default function MessagesScreen() {
 
   const inputRef = useRef<TextInput>(null);
 
+  const fetchChatUsers = useCallback(async () => {
+    if (!userProfile?.id) { setIsLoadingUsers(false); return; }
+    // We don't necessarily want to show the full-screen loader every time we refresh
+    try {
+      const users = await getChatListUsers(userProfile.id);
+      setChatUsers(users);
+    } catch (err) {
+      console.error('Could not fetch chat users', err);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, [userProfile?.id]);
+
   // Mark messages read on mount (list view)
   useEffect(() => {
     if (userProfile?.id && !params.chatWith) {
@@ -148,20 +161,8 @@ export default function MessagesScreen() {
 
   // Load chat list
   useEffect(() => {
-    const fetchUsers = async () => {
-      if (!userProfile?.id) { setIsLoadingUsers(false); return; }
-      setIsLoadingUsers(true);
-      try {
-        const users = await getChatListUsers(userProfile.id);
-        setChatUsers(users);
-      } catch (err) {
-        console.error('Could not fetch chat users', err);
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    };
-    fetchUsers();
-  }, [userProfile?.id]);
+    fetchChatUsers();
+  }, [fetchChatUsers]);
 
   // Open chat from params (e.g. from profile "Message" button)
   useEffect(() => {
@@ -250,7 +251,8 @@ export default function MessagesScreen() {
       if (error) {
         console.error('Error loading messages:', error);
       } else {
-        const hydrated = (data || []).map((msg: any) => {
+        const rawMessages = data || [];
+        const hydrated = rawMessages.map((msg: any) => {
           const full: Message = { ...msg, sharedPost: null, sharedUser: null, repliedStory: null, repliedMessage: null };
           if (msg.sharedPost) full.sharedPost = mapPostData(msg.sharedPost);
           if (msg.sharedUser) {
@@ -266,7 +268,7 @@ export default function MessagesScreen() {
           return full;
         });
 
-        // Link replies
+        // Link replies - ensure all messages are considered
         const withReplies = hydrated.map(msg => {
           if (msg.reply_to) {
             const replied = hydrated.find(m => m.id === msg.reply_to);
@@ -274,7 +276,16 @@ export default function MessagesScreen() {
           }
           return msg;
         });
-        setMessages(withReplies);
+
+        // Deduplicate and ensure order
+        const unique = withReplies.reduce((acc: Message[], current) => {
+          if (!acc.find(item => item.id === current.id)) {
+            acc.push(current);
+          }
+          return acc;
+        }, []).sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+        setMessages(unique);
       }
     };
     loadMessages();
@@ -293,9 +304,14 @@ export default function MessagesScreen() {
             (newMsg.sender_id === userProfile.id && newMsg.receiver_id === chatWith.id) ||
             (newMsg.sender_id === chatWith.id && newMsg.receiver_id === userProfile.id)
           ) {
+            console.log("New message received:", newMsg.text);
             const hydrateAndSet = async () => {
               let sharedPost: Post | null = null;
               let sharedUser: SimpleUser | null = null;
+
+              // Handle potential null/empty text from Love Mode triggers
+              const msgText = newMsg.text || (newMsg.type === 'love_request' ? "Love Mode unlocked!" : "");
+
               if (newMsg.shared_post_id) {
                 sharedPost = (await getPostById(newMsg.shared_post_id)) || null;
               }
@@ -305,15 +321,55 @@ export default function MessagesScreen() {
                   sharedUser = { id: profile.id, name: profile.full_name, username: profile.username, avatar: profile.avatar_url, isVerified: profile.is_verified, bio: profile.bio };
                 }
               }
-              const hydrated: Message = { ...newMsg, sharedPost, sharedUser, repliedStory: null };
+
+              // Hydrate reply data for realtime messages
+              let repliedMessage: Message | null = null;
+              if (newMsg.reply_to) {
+                const { data: replyData } = await supabase
+                  .from('messages')
+                  .select('*')
+                  .eq('id', newMsg.reply_to)
+                  .single();
+                if (replyData) {
+                  repliedMessage = replyData as Message;
+                }
+              }
+
+              const hydrated: Message = {
+                ...newMsg,
+                text: msgText,
+                sharedPost,
+                sharedUser,
+                repliedStory: null,
+                repliedMessage
+              };
 
               setMessages(prev => {
-                if (hydrated.reply_to) {
-                  const replied = prev.find(m => m.id === hydrated.reply_to);
-                  hydrated.repliedMessage = replied || null;
-                }
+                // Check if we already have this message (real ID)
                 if (prev.some(m => m.id === hydrated.id)) return prev;
-                return [...prev, hydrated];
+
+                // Check if this is a realtime update for an optimistic message we sent
+                // Match by sender, receiver and either text or type
+                const tempIndex = prev.findIndex(m =>
+                  m.id.startsWith('temp-') &&
+                  m.sender_id === hydrated.sender_id &&
+                  (m.text === hydrated.text || m.type === hydrated.type)
+                );
+
+                if (tempIndex !== -1) {
+                  const updated = [...prev];
+                  updated[tempIndex] = { ...updated[tempIndex], ...hydrated };
+                  return updated;
+                }
+
+                // Final deduplication and sort to ensure consistency across sessions
+                const newMessages = [...prev, hydrated];
+                return newMessages
+                  .reduce((acc: Message[], curr) => {
+                    if (!acc.find(m => m.id === curr.id)) acc.push(curr);
+                    return acc;
+                  }, [])
+                  .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
               });
             };
             hydrateAndSet();
@@ -329,6 +385,7 @@ export default function MessagesScreen() {
     setChatWith(null);
     setReplyingTo(null);
     setMessages([]);
+    fetchChatUsers(); // Refresh list when going back
   };
 
   const handleSendMessage = async () => {
@@ -365,10 +422,37 @@ export default function MessagesScreen() {
         reply_to,
       });
       setMessages(prev => prev.map(msg => msg.id === tempId ? { ...msg, ...data, repliedMessage: optimistic.repliedMessage } : msg));
+      // Optionally update chat list order in background
+      fetchChatUsers();
     } catch (error) {
       console.error('Error sending message:', error);
       addToast('Failed to send message.', 'error');
       setMessages(prev => prev.filter(msg => msg.id !== tempId));
+    }
+  };
+
+  const startLoveMode = async () => {
+    if (!chatWith || !userProfile?.id) return;
+
+    try {
+      triggerHapticFeedback('medium');
+      const text = "💖 I want to start Love Mode with you!";
+      await sendMessage({
+        sender_id: userProfile.id,
+        receiver_id: chatWith.id,
+        text,
+        type: 'love_request'
+      });
+      await sendNotification({
+        sender_id: userProfile.id,
+        receiver_id: chatWith.id,
+        type: 'love_request',
+        content: text
+      });
+      addToast("Love Mode request sent!", "success");
+      fetchChatUsers();
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -391,6 +475,35 @@ export default function MessagesScreen() {
       addToast('Could not delete chat.', 'error');
     }
   };
+
+  // Realtime for chat list
+  useEffect(() => {
+    if (!userProfile?.id) return;
+
+    const channel = supabase
+      .channel(`chat-list-${userProfile.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${userProfile.id}`
+      }, (payload) => {
+        console.log('Realtime message for chat list (received):', payload.new);
+        fetchChatUsers();
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `sender_id=eq.${userProfile.id}`
+      }, (payload) => {
+        console.log('Realtime message for chat list (sent):', payload.new);
+        fetchChatUsers();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userProfile?.id, fetchChatUsers]);
 
   // ─── Chat View ────────────────────────────────
 
@@ -441,9 +554,25 @@ export default function MessagesScreen() {
             )}
 
             {/* Text */}
-            {msg.text ? (
+            {msg.text || msg.type === 'love_request' || msg.type === 'love_update' ? (
               <View className="px-1 py-1">
-                <RenderUserContent content={msg.text} className="text-white" />
+                {msg.type === 'love_request' || msg.type === 'love_update' || (msg.text && msg.text.includes("unlocked Love Mode")) ? (
+                  <Pressable
+                    onPress={() => router.push({
+                      pathname: '/love-mode',
+                      params: { partnerId: isMyMessage ? msg.receiver_id : msg.sender_id, partnerUsername: chatWith.username }
+                    })}
+                    className="bg-white/10 p-3 rounded-xl border border-white/20 items-center"
+                  >
+                    <HeartIcon color="#ec4899" size={24} />
+                    <Text className="text-white font-bold text-center">{msg.text || (msg.type === 'love_request' ? "Love Mode unlocked!" : "Love Mode update!")}</Text>
+                    <Text className="text-pink-400 text-xs mt-2 font-bold uppercase">
+                      {isMyMessage && msg.type === 'love_request' ? "Waiting for partner..." : msg.type === 'love_update' ? "View Match" : "Tap to Start"}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <RenderUserContent content={msg.text || ''} className="text-white" />
+                )}
               </View>
             ) : null}
 
@@ -468,7 +597,11 @@ export default function MessagesScreen() {
               </Pressable>
             ),
             headerRight: () => (
-              <Pressable onPress={() => router.push(`/user/${chatWith.username}`)}>
+              <Pressable
+                onPress={() => router.push(`/user/${chatWith.username}`)}
+                onLongPress={startLoveMode} // Secret trigger: Long press avatar to start Love Mode
+                delayLongPress={500} // Even easier but still secret
+              >
                 <UserAvatar username={chatWith.username} avatarUrl={chatWith.avatar} size={32} />
               </Pressable>
             ),

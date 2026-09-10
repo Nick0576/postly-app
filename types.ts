@@ -35,6 +35,14 @@ export interface UserProfile {
     isPrivate?: boolean;
 }
 
+export interface SavedAccount {
+    id: string;
+    name: string;
+    username: string;
+    profilePicture: string | null;
+    session: any; // The Supabase session object
+}
+
 export interface PollOption {
     text: string;
     votes: number;
@@ -88,7 +96,7 @@ export interface NotificationStory {
 
 export interface Notification {
     id: string;
-    type: 'like' | 'comment' | 'follow' | 'comment_like' | 'repost' | 'mention' | 'story_like';
+    type: 'like' | 'comment' | 'follow' | 'comment_like' | 'repost' | 'mention' | 'story_like' | 'love_request' | 'love_update';
     is_read: boolean;
     created_at: string;
     content?: string | null;

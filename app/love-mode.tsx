@@ -44,10 +44,15 @@ export default function LoveModeScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [partnerProgress, setPartnerProgress] = useState(0);
   const [partnerCompleted, setPartnerCompleted] = useState(false);
+  const [partnerAnswers, setPartnerAnswers] = useState<Record<number, boolean>>({});
 
   const yesScale = useSharedValue(1);
   const noScale = useSharedValue(1);
   const questionOpacity = useSharedValue(1);
+
+  const amICompleted = Object.keys(answers).length === QUESTIONS.length && loveMode.isCompleted;
+  const showResults = amICompleted && partnerCompleted;
+  const showWaiting = amICompleted && !partnerCompleted;
 
   useEffect(() => {
     if (partnerId && partnerId !== loveMode.partnerId) {
@@ -55,7 +60,6 @@ export default function LoveModeScreen() {
       setAnswers({});
     }
 
-    // Subscribe to partner's progress
     const targetPartnerId = partnerId || loveMode.partnerId;
     if (!targetPartnerId) return;
 
@@ -72,9 +76,11 @@ export default function LoveModeScreen() {
         (payload) => {
           const data = payload.new as any;
           if (data && data.partner_id === userProfile.id) {
-            const ansCount = data.answers ? Object.keys(data.answers).length : 0;
+            const ans = data.answers || {};
+            const ansCount = Object.keys(ans).length;
             setPartnerProgress((ansCount / QUESTIONS.length) * 100);
             setPartnerCompleted(!!data.is_completed);
+            setPartnerAnswers(ans);
 
             if (data.is_completed) {
               triggerHapticFeedback('medium');
@@ -85,8 +91,7 @@ export default function LoveModeScreen() {
       )
       .subscribe();
 
-    // Initial fetch for partner progress
-    const fetchPartnerProgress = async () => {
+    const fetchPartnerData = async () => {
         const { data } = await supabase
             .from('love_mode_results')
             .select('answers, is_completed')
@@ -95,12 +100,14 @@ export default function LoveModeScreen() {
             .maybeSingle();
 
         if (data) {
-            const ansCount = data.answers ? Object.keys(data.answers).length : 0;
+            const ans = data.answers || {};
+            const ansCount = Object.keys(ans).length;
             setPartnerProgress((ansCount / QUESTIONS.length) * 100);
             setPartnerCompleted(!!data.is_completed);
+            setPartnerAnswers(ans);
         }
     };
-    fetchPartnerProgress();
+    fetchPartnerData();
 
     return () => {
       supabase.removeChannel(channel);
@@ -109,15 +116,20 @@ export default function LoveModeScreen() {
 
   const saveIncrementalProgress = async (newAnswers: Record<number, boolean>) => {
     try {
+      const isDone = Object.keys(newAnswers).length === QUESTIONS.length;
       await supabase
         .from('love_mode_results')
         .upsert({
           user_id: userProfile.id,
           partner_id: partnerId || loveMode.partnerId,
           answers: newAnswers,
-          is_completed: Object.keys(newAnswers).length === QUESTIONS.length,
+          is_completed: isDone,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'user_id, partner_id' });
+
+      if (isDone) {
+          updateLoveMode({ isCompleted: true, answers: newAnswers });
+      }
     } catch (e) {
       console.error("Incremental save failed", e);
     }
@@ -126,7 +138,6 @@ export default function LoveModeScreen() {
   const handleAnswer = (val: boolean) => {
     triggerHapticFeedback('light');
 
-    // Animation
     if (val) {
         yesScale.value = withSequence(withSpring(1.2), withSpring(1));
     } else {
@@ -137,7 +148,6 @@ export default function LoveModeScreen() {
     setAnswers(newAnswers);
     updateLoveMode({ answers: newAnswers });
 
-    // Save progress to Supabase for partner to see
     saveIncrementalProgress(newAnswers);
 
     if (currentIndex < QUESTIONS.length - 1) {
@@ -165,11 +175,10 @@ export default function LoveModeScreen() {
           answers: answers,
           is_completed: true,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'user_id, partner_id' });
 
       if (error) throw error;
 
-      // Send a specialized message to the partner
       await supabase.from('messages').insert({
           sender_id: userProfile.id,
           receiver_id: partnerId || loveMode.partnerId,
@@ -180,13 +189,23 @@ export default function LoveModeScreen() {
 
       updateLoveMode({ isCompleted: true });
       addToast("Love Mode answers submitted!", "success");
-      router.back();
+      // Don't router.back(), let them see the "Waiting" or "Results" screen
     } catch (error) {
       console.error("Error saving love mode results:", error);
       addToast("Failed to save results.", "error");
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const calculateMatch = () => {
+    let matches = 0;
+    Object.keys(answers).forEach((key: any) => {
+        if (answers[key] === partnerAnswers[key]) {
+            matches++;
+        }
+    });
+    return Math.round((matches / QUESTIONS.length) * 100);
   };
 
   const themeColor = gender === 'girl' ? 'pink' : 'blue';
@@ -204,6 +223,56 @@ export default function LoveModeScreen() {
     opacity: questionOpacity.value,
     transform: [{ scale: questionOpacity.value * 0.1 + 0.9 }]
   }));
+
+  if (showResults) {
+      const matchPercent = calculateMatch();
+      return (
+        <SafeAreaView className={`flex-1 ${gender === 'girl' ? 'bg-pink-950' : 'bg-blue-950'}`}>
+            <Stack.Screen options={{ title: 'Match Result', headerTransparent: true, headerTintColor: '#fff' }} />
+            <ScrollView className="flex-1 px-6 pt-20">
+                <View className="items-center mb-8">
+                    <View className="w-48 h-48 rounded-full items-center justify-center border-8 border-white/20 bg-black/20">
+                        <Text className="text-white text-6xl font-black">{matchPercent}%</Text>
+                        <Text className="text-white/60 font-bold uppercase tracking-widest text-xs">Match Score</Text>
+                    </View>
+                    <Text className="text-white text-2xl font-bold mt-6 text-center">
+                        {matchPercent > 80 ? "Perfect Harmony! 💖" : matchPercent > 50 ? "Great Connection! ✨" : "Different Perspectives! 🌈"}
+                    </Text>
+                </View>
+
+                <View className="bg-black/30 rounded-3xl p-6 border border-white/10 mb-20">
+                    <Text className="text-white/60 font-bold mb-4 uppercase text-xs tracking-widest">Answer Breakdown</Text>
+                    {QUESTIONS.map((q, i) => (
+                        <View key={i} className="flex-row items-center py-3 border-b border-white/5">
+                            <View className={`w-2 h-2 rounded-full mr-3 ${answers[i] === partnerAnswers[i] ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.6)]' : 'bg-red-400'}`} />
+                            <Text className="text-white/80 flex-1 text-sm" numberOfLines={1}>{q}</Text>
+                            <Text className="text-white/40 text-xs font-bold ml-2">
+                                {answers[i] ? 'YES' : 'NO'} / {partnerAnswers[i] ? 'YES' : 'NO'}
+                            </Text>
+                        </View>
+                    ))}
+                </View>
+            </ScrollView>
+        </SafeAreaView>
+      );
+  }
+
+  if (showWaiting) {
+      return (
+        <SafeAreaView className={`flex-1 ${gender === 'girl' ? 'bg-pink-950' : 'bg-blue-950'} items-center justify-center px-8`}>
+            <Stack.Screen options={{ title: 'Waiting...', headerTransparent: true, headerTintColor: '#fff' }} />
+            <HeartIcon color="#fff" size={64} style={{ opacity: 0.2 }} />
+            <Text className="text-white text-3xl font-black text-center mt-6">Results Pending</Text>
+            <Text className="text-white/60 text-center mt-4 text-lg">
+                You've finished your questions! We're waiting for @{partnerUsername || 'your partner'} to complete theirs.
+            </Text>
+            <ActivityIndicator color="#fff" style={{ marginTop: 40 }} />
+            <Pressable onPress={() => router.back()} className="mt-12 bg-white/10 px-8 py-4 rounded-full">
+                <Text className="text-white font-bold">Go Back to Chat</Text>
+            </Pressable>
+        </SafeAreaView>
+      );
+  }
 
   return (
     <SafeAreaView className={`flex-1 ${gender === 'girl' ? 'bg-pink-950' : 'bg-blue-950'}`}>

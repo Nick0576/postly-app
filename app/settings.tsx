@@ -14,8 +14,8 @@
 // limitations under the License.
 
 import React from 'react';
-import { View, Text, Pressable, ScrollView, Switch, Alert } from 'react-native';
-import { Stack, useRouter, Link } from 'expo-router';
+import { View, Text, Pressable, ScrollView, Alert, Linking } from 'react-native';
+import { Stack, Link } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '../store/AppContext.native';
 import { supabase } from '../services/supabase.native';
@@ -23,7 +23,6 @@ import { LogoutIcon, ChevronRightIcon, TrashIcon } from '../components/native/Ic
 
 export default function SettingsScreen() {
   const { theme, setTheme, addToast } = useApp();
-  const router = useRouter();
 
   const handleLogout = async () => {
     try {
@@ -116,6 +115,30 @@ export default function SettingsScreen() {
             >
               <Text className="text-white text-base">System Default</Text>
               {theme === 'system' && <View className="w-2 h-2 rounded-full bg-blue-500" />}
+            </Pressable>
+          </View>
+
+          {/* Contribute */}
+          <Text className="text-gray-500 font-bold mb-4 ml-1">CONTRIBUTE</Text>
+          <View className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden mb-8">
+            <Pressable
+              onPress={() => {
+                Linking.openURL('https://zappfiles.com/r/rK5zOMxn5MAnweARKJVOVQ').catch(() => {
+                  addToast('Could not open the contribution link.', 'error');
+                });
+              }}
+              className="px-4 py-4"
+            >
+              <View className="flex-row items-center justify-between mb-2">
+                <Text className="text-white text-base">Donate a File</Text>
+                <ChevronRightIcon color="#6b7280" />
+              </View>
+              <Text className="text-gray-400 text-sm">
+                You can send music, artwork, themes, or other files that you'd like to contribute to the project.
+              </Text>
+              <Text className="text-gray-500 text-xs mt-2 italic leading-4">
+                ⚠️ Warning: Please only send files you have permission to share. Do not send personal, illegal, malicious, or harmful files. Uploaded files may be reviewed and removed.
+              </Text>
             </Pressable>
           </View>
 

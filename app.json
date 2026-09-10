@@ -8,6 +8,12 @@
     "scheme": "postly",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/5e118560-f83a-4e77-9176-0ffa4425ec3c"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -88,7 +94,8 @@
           "icon": "./assets/notification-icon.png",
           "color": "#3b82f6"
         }
-      ]
+      ],
+      "expo-updates"
     ],
     "extra": {
       "router": {},

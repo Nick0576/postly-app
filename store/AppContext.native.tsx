@@ -19,7 +19,7 @@ import { publishPost, deletePost, updatePost, toggleLike as apiToggleLike, toggl
 import { supabase } from '../services/supabase.native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
-import type { Comment, Post, Story, UserProfile, Toast, Notification, Message } from '../types';
+import type { Comment, Post, Story, UserProfile, Toast, Notification, Message, SavedAccount } from '../types';
 import { Gender, LoveModeState } from '../types';
 import { normalizeNotifications } from '../types';
 
@@ -50,6 +50,7 @@ interface AppState {
     unreadChats: Set<string>;
     topNotification: { title: string; message: string } | null;
     isAdmin: boolean;
+    savedAccounts: SavedAccount[];
 }
 
 interface AppContextType extends AppState {
@@ -100,6 +101,9 @@ interface AppContextType extends AppState {
     markAllMessagesAsRead: () => Promise<void>;
     markChatAsRead: (senderId: string) => Promise<void>;
     replaceStory: (localId: string, realStory: Story) => void;
+    switchAccount: (accountId: string) => Promise<void>;
+    removeSavedAccount: (accountId: string) => Promise<void>;
+    logout: () => Promise<void>;
 }
 
 
@@ -109,6 +113,7 @@ const BLOCKED_USERS_KEY = 'postly-blocked-users';
 const THEME_KEY = 'postly-theme';
 const GENDER_KEY = 'postly-gender';
 const LOVE_MODE_KEY = 'postly-love-mode';
+const SAVED_ACCOUNTS_KEY = 'postly-saved-accounts';
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [state, setState] = useState<AppState>(() => {
@@ -150,6 +155,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             unreadChats: new Set(),
             topNotification: null,
             isAdmin: false,
+            savedAccounts: [],
         };
     });
 
@@ -157,11 +163,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     useEffect(() => {
         const loadPersistedData = async () => {
             try {
-                const [blocked, theme, gender, loveMode] = await Promise.all([
+                const [blocked, theme, gender, loveMode, savedAccounts] = await Promise.all([
                     AsyncStorage.getItem(BLOCKED_USERS_KEY),
                     AsyncStorage.getItem(THEME_KEY),
                     AsyncStorage.getItem(GENDER_KEY),
                     AsyncStorage.getItem(LOVE_MODE_KEY),
+                    AsyncStorage.getItem(SAVED_ACCOUNTS_KEY),
                 ]);
 
                 setState(prevState => ({
@@ -170,6 +177,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     theme: (theme as any) || prevState.theme,
                     gender: (gender as Gender) || prevState.gender,
                     loveMode: loveMode ? JSON.parse(loveMode) : prevState.loveMode,
+                    savedAccounts: savedAccounts ? JSON.parse(savedAccounts) : [],
                 }));
             } catch (e) {
                 console.error("Could not load persisted data from AsyncStorage", e);
@@ -189,26 +197,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         let messagesChannel: any;
 
         const setupSubscriptions = async () => {
-            const { data, error } = await supabase
-                .from("notifications")
-                .select(`
-                    id, type, is_read, created_at, content, comment_id,
-                    sender:profiles!notifications_sender_id_fkey(id, username, avatar_url),
-                    post:posts!notifications_post_id_fkey(id, content, media:image_url, media_type),
-                    comment:comments!notifications_comment_id_fkey(id, text:content),
-                    story:stories!notifications_story_id_fkey(id, media_url)
-                `)
-                .eq("receiver_id", userId)
-                .order("created_at", { ascending: false });
+            const fetchNotifications = async () => {
+                const { data, error } = await supabase
+                    .from("notifications")
+                    .select(`
+                        id, type, is_read, created_at, content, comment_id,
+                        sender:profiles!notifications_sender_id_fkey(id, username, avatar_url),
+                        post:posts!notifications_post_id_fkey(id, content, media:image_url, media_type),
+                        comment:comments!notifications_comment_id_fkey(id, text:content),
+                        story:stories!notifications_story_id_fkey(id, media_url)
+                    `)
+                    .eq("receiver_id", userId)
+                    .order("created_at", { ascending: false });
 
-            if (error) {
-                console.error("Error fetching initial notifications:", error.message || error);
-            } else {
-                 setState(prev => ({
-                    ...prev,
-                    notifications: normalizeNotifications(data || [])
-                }));
-            }
+                if (!error) {
+                    setState(prev => ({
+                        ...prev,
+                        notifications: normalizeNotifications(data || [])
+                    }));
+                }
+            };
+
+            await fetchNotifications();
+
+            notificationsChannel = supabase
+                .channel(`public:notifications-realtime-${userId}-${Date.now()}`)
+                .on(
+                    'postgres_changes',
+                    { event: 'INSERT', schema: 'public', table: 'notifications', filter: `receiver_id=eq.${userId}` },
+                    (payload) => {
+                        fetchNotifications();
+                        const newNotif = payload.new as any;
+                        if (newNotif.type === 'love_request') {
+                            showTopNotification("Love Mode Unlocked! 💖", newNotif.content || "You've unlocked a secret feature.");
+                            triggerHapticFeedback('medium');
+                        }
+                    }
+                )
+                .subscribe();
 
             // Listen for new messages in real-time
             const fetchUnreadData = async () => {
@@ -301,7 +327,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             await ensureCurrentUserProfile();
 
             // Use Promise.all to fetch profile, likes, reposts, follows, and stories concurrently for better performance.
-            const [profileResult, likesResult, repostsResult, savedPostsResult, followingResult, myStoriesResult, storyLikesResult, unreadMessagesResult] = await Promise.all([
+            const [profileResult, likesResult, repostsResult, savedPostsResult, followingResult, myStoriesResult, storyLikesResult, unreadMessagesResult, sessionResult] = await Promise.all([
                 supabase
                     .from('profiles')
                     .select('full_name, username, avatar_url, is_verified, bio')
@@ -313,7 +339,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 getFollowingList(user.id),
                 getMyStories(user.id),
                 supabase.from('story_likes').select('story_id').eq('user_id', user.id),
-                supabase.from('messages').select('sender_id').eq('receiver_id', user.id).eq('seen', false)
+                supabase.from('messages').select('sender_id').eq('receiver_id', user.id).eq('seen', false),
+                supabase.auth.getSession()
             ]);
 
             // Destructure results
@@ -325,6 +352,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             const myStories = myStoriesResult as Story[];
             const { data: storyLikesData } = storyLikesResult as any;
             const { data: unreadMessagesData } = unreadMessagesResult;
+            const { data: { session } } = sessionResult;
 
             const unreadChats = new Set(unreadMessagesData?.map(m => m.sender_id) || []);
             const unreadMessageCount = unreadChats.size;
@@ -332,13 +360,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             // Update state in a single, batched call to avoid multiple re-renders.
             setState(prevState => {
                 const newUserProfile = {
-                    ...prevState.userProfile,
                     id: user.id,
-                    name: user.user_metadata.full_name || profileData?.full_name || prevState.userProfile.name,
-                    username: user.user_metadata.username || profileData?.username || prevState.userProfile.username,
-                    profilePicture: user.user_metadata.avatar_url || profileData?.avatar_url || prevState.userProfile.profilePicture,
-                    isVerified: profileData?.is_verified ?? prevState.userProfile.isVerified,
-                    bio: profileData?.bio || prevState.userProfile.bio,
+                    name: user.user_metadata.full_name || profileData?.full_name || 'Postly User',
+                    username: user.user_metadata.username || profileData?.username || 'postly_user',
+                    profilePicture: user.user_metadata.avatar_url || profileData?.avatar_url || null,
+                    isVerified: profileData?.is_verified ?? false,
+                    bio: profileData?.bio || 'Hello, I am using Postly',
                 };
 
                 const isAdmin = newUserProfile.username === 'postly';
@@ -346,15 +373,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
                 const newLikedPosts = (likedPostsData && Array.isArray(likedPostsData))
                     ? new Set(likedPostsData.map(l => l.post_id))
-                    : prevState.likedPosts;
+                    : new Set<string>();
 
                 const newRepostedPosts = (repostedPostsData && Array.isArray(repostedPostsData))
                     ? new Set(repostedPostsData.map(r => r.post_id))
-                    : prevState.repostedPosts;
+                    : new Set<string>();
 
                 const newSavedPosts = (savedPostsData && Array.isArray(savedPostsData))
                     ? new Set(savedPostsData.map(s => s.post_id))
-                    : prevState.savedPosts;
+                    : new Set<string>();
 
                 const newFollowedUsernames = new Set(
                     (followingUsernames || []).map((username) => username.toLowerCase())
@@ -362,7 +389,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
                 const newLikedStoryIds = (storyLikesData && Array.isArray(storyLikesData))
                     ? new Set(storyLikesData.map(l => l.story_id))
-                    : prevState.likedStoryIds;
+                    : new Set<string>();
+
+                // Update saved accounts
+                let updatedSavedAccounts = [...prevState.savedAccounts];
+                const existingAccountIndex = updatedSavedAccounts.findIndex(acc => acc.id === user.id);
+
+                const currentAccount: SavedAccount = {
+                    id: user.id,
+                    name: newUserProfile.name,
+                    username: newUserProfile.username,
+                    profilePicture: newUserProfile.profilePicture,
+                    session: session
+                };
+
+                if (existingAccountIndex >= 0) {
+                    updatedSavedAccounts[existingAccountIndex] = currentAccount;
+                } else if (updatedSavedAccounts.length < 5) {
+                    updatedSavedAccounts.push(currentAccount);
+                }
+
+                AsyncStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(updatedSavedAccounts)).catch(console.error);
 
                 return {
                     ...prevState,
@@ -376,6 +423,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     unreadMessageCount: unreadMessageCount,
                     unreadChats: unreadChats,
                     isAdmin: isAdmin,
+                    savedAccounts: updatedSavedAccounts,
+                    // Reset local caches to prevent state bleeding between accounts
+                    postComments: new Map(),
+                    profilePosts: [],
+                    storyComments: new Map(),
+                    viewedStoryTimestamps: new Set(),
+                    votedPolls: new Map(),
+                    notifications: null,
+                    likedVideoIds: new Set(),
                 };
             });
         } catch (error) {
@@ -1111,6 +1167,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setState((prevState: AppState) => ({ ...prevState, tooltip }));
     }, []);
 
+    const switchAccount = useCallback(async (accountId: string) => {
+        const account = state.savedAccounts.find(acc => acc.id === accountId);
+        if (!account || !account.session) {
+            addToast("Account session expired. Please log in again.", "error");
+            return;
+        }
+
+        try {
+            const { error } = await supabase.auth.setSession({
+                access_token: account.session.access_token,
+                refresh_token: account.session.refresh_token,
+            });
+
+            if (error) throw error;
+
+            addToast(`Switched to @${account.username}`, "success");
+
+            // Refresh all data immediately to reflect the new account's state
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await syncUserData(user);
+            }
+        } catch (error) {
+            console.error("Failed to switch account:", error);
+            addToast("Failed to switch account.", "error");
+        }
+    }, [state.savedAccounts, addToast]);
+
+    const removeSavedAccount = useCallback(async (accountId: string) => {
+        setState(prevState => {
+            const updatedSavedAccounts = prevState.savedAccounts.filter(acc => acc.id !== accountId);
+            AsyncStorage.setItem(SAVED_ACCOUNTS_KEY, JSON.stringify(updatedSavedAccounts)).catch(console.error);
+            return { ...prevState, savedAccounts: updatedSavedAccounts };
+        });
+        addToast("Account removed.", "info");
+    }, [addToast]);
+
+    const logout = useCallback(async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            await supabase.auth.signOut();
+        }
+    }, []);
+
     const contextValue = useMemo(() => ({
         ...state,
         togglePostLike,
@@ -1160,6 +1260,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         markAllMessagesAsRead,
         markChatAsRead,
         replaceStory,
+        switchAccount,
+        removeSavedAccount,
+        logout,
     }), [
         state,
         togglePostLike,
@@ -1209,6 +1312,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         markAllMessagesAsRead,
         markChatAsRead,
         replaceStory,
+        switchAccount,
+        removeSavedAccount,
+        logout,
     ]);
 
 
