@@ -25,15 +25,16 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Force specific NDK version that matches your project requirements
+          packages: 'platforms;android-35 build-tools;35.0.0 ndk;27.0.12077973'
 
       - name: Install dependencies
         run: |
           npm install
-          # CRITICAL FIX: Reanimated 4 looks for 'react-native-worklets' 
-          # but the package is 'react-native-worklets-core'. 
-          # This command creates the path it expects.
+          # Manual fix for Reanimated 4 / Worklets directory naming conflict
           mkdir -p node_modules/react-native-worklets
-          cp -R node_modules/react-native-worklets-core/* node_modules/react-native-worklets/ || true
+          cp -r node_modules/react-native-worklets-core/* node_modules/react-native-worklets/ || true
 
       - name: Prebuild Android
         env:
@@ -45,10 +46,12 @@ jobs:
         env:
           EXPO_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
           EXPO_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
-          NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_OPTIONS: "--max-old-space-size=6144"
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m"
         run: |
           cd android
           chmod +x gradlew
+          # Skip lint and force debug build which is more resilient to environment issues
           ./gradlew assembleDebug -x lint --no-daemon
           
       - name: Upload APK
